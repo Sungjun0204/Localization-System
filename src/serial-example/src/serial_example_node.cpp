@@ -65,7 +65,7 @@ int main (int argc, char** argv){
             std_msgs::String result;
             result.data = ser.read(ser.available());
             //ROS_INFO_STREAM("Read: " << result.data);
-            ROS_INFO_STREAM(result.data);       // print comm results
+            //ROS_INFO_STREAM(result.data);       // print comm results
             read_pub.publish(result);
         }
         loop_rate.sleep();
