@@ -123,8 +123,8 @@ def parse_packet(packet):
 
         sensor_values = [parse_value(value) for value in sensor_str.split(',')]
         raw_sum += sum(sensor_values)  # 가공 전 원본 데이터 합산
-        sensor_values[0] *= -1
-        sensor_values = [v / 1000000.0 for v in sensor_values]  # UART통신을 위해 없앴던 소수점 부활 (/100)
+        sensor_values[0] *= -1         # 모든 X 좌표에 -1을 곱하여 좌표계를 오른손 기준으로 변경
+        sensor_values = [v / 10 for v in sensor_values]  # UART통신을 위해 없앴던 소수점 부활 (/100)
                                                                 # hall seneor는 단위가 uT이므로, mT로 단위 통일 (/1000)
                                                                 # 만약 측정 단위가 nT라면 (/1,000,000) 연산을 해 줘야 함
                                                                 # 따라서 100,000을 나눠준다
@@ -136,7 +136,7 @@ def parse_packet(packet):
     if raw_sum != checksum:
         return 0
 
-    #pretty_print(sensors_data)  # 패킷에서 분리한 raw data 값 확인
+    # pretty_print(sensors_data)  # 패킷에서 분리한 raw data 값 확인
     return sensors_data
 
 
@@ -167,21 +167,20 @@ def offset_Setting():
     global array_Val, zero_Val, first_value
     result = [0, 0, 0]
 
-    #pprint.pprint(first_value)
-
     ### 출력 log 없이 한 줄로만 출력하고 싶을 때 사용 ###
     ## command = "clear"
     ## subprocess.call(command, shell=True)
 
-    array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
+    #array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
     
     ### 본격적인 위치추정 코드 ###
     initial_guess = first_value    # 초기 자석의 위치좌표 및 자계강도 값
+    bounds = ([-0.120, -0.120, 0, 0, 0],[0.120, 0.120, 0.1, 1, 1])   # initial_guess의 제약 설정
 
-    result_pos = least_squares(residuals, initial_guess)    # Levenberg-Marquardt Algorithm 계산
+    result_pos = least_squares(residuals, initial_guess, bounds=bounds)    # Levenberg-Marquardt Algorithm 계산
     
     result = np.array([result_pos.x[0], result_pos.x[1], result_pos.x[2]])  # 위치 근사값만 따로 저장
-    pprint.pprint(result)                          # 위치 근사값 출력
+    pprint.pprint(result * 1000)                          # 위치 근사값 출력
     
     # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
     for i in range(5):
@@ -200,7 +199,7 @@ def residuals(init_pos):
     val =  [[array_Val[0],array_Val[1],array_Val[2]],
             [array_Val[3],array_Val[4],array_Val[5]],
             [array_Val[6],array_Val[7],array_Val[8]]]        # 센서 값을 3x3 형태로 다시 저장(for 계산 용이)
-    k_ij = []     # K_i,j 값을 저장할 리스트 변수 초기화
+    k_ij = []     # K(i,j) 값을 저장할 리스트 변수 초기화
     hh = 0.118       # 센서들 사이 떨어져있는 거리
 
     # K_ij 값 계산
@@ -214,16 +213,11 @@ def residuals(init_pos):
             param[4]=(-4)*(val[i][j][2])
 
             k_ij.append( (-1)*(sum(param) / (hh**2)) )
-
-    # pprint.pprint(k_ij)
-    # print("----------------------")
     
     # 위치에 대한 잔차 값의 총합 저장
     for i in range(9):
         buffer_residual = k_ij[i] - cal_BB(init_pos, P[i])  # 실제값과 이론값 사이의 잔차 계산
         differences += buffer_residual    # 각 센서들의 잔차를 각 축 성분끼리 더한다
-
-
 
     #pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
     return differences
@@ -234,8 +228,8 @@ def residuals(init_pos):
 def cal_BB(A_and_H, P):
     global MU0
     A = [A_and_H[0], A_and_H[1], A_and_H[2]]    # 위치 값 따로 A 리스트에 저장
-    M = [A_and_H[3], A_and_H[4]]; M.append(1-(M[0]**2)-(M[1]**2))    # 자계강도 값 따로 H 리스트에 저장
-    R = np.array(P-A)
+    M = [A_and_H[3], A_and_H[4]]; M.insert(0, 1-(M[0]**2)-(M[1]**2))    # 자계강도 값 따로 H 리스트에 저장
+    R = np.array(A-P)
 
     const = MU0 / (4*np.pi)     # 상수항 계산
     b1 = (9*M[2]) / (np.linalg.norm(R) ** 5)
@@ -248,14 +242,6 @@ def cal_BB(A_and_H, P):
 # 두 점 사이의 거리를 구하는 함수
 def distance_3d(point1, point2):
     return ((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2 + (point1[2] - point2[2])**2)**0.5
-
-""" # H dot P의 값을 계산하는 함수
-def h_dot_p(A, H, P):
-    return (H[0]*(P[0]-A[0])) + (H[1]*(P[1]-A[1])) + (H[2]*(P[2]-A[2])) """
-
-
-
-
 
 
 
@@ -274,10 +260,6 @@ def main():
 
 
     rospy.spin()    # node 무한 반복
-
-
-
-
 
 
 if __name__ == '__main__':
