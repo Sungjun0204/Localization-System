@@ -171,13 +171,13 @@ def offset_Setting():
     ## command = "clear"
     ## subprocess.call(command, shell=True)
 
-    #array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
+    array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
     
     ### 본격적인 위치추정 코드 ###
     initial_guess = first_value    # 초기 자석의 위치좌표 및 자계강도 값
-    bounds = ([-0.120, -0.120, 0, 0, 0],[0.120, 0.120, 0.1, 1, 1])   # initial_guess의 제약 설정
+    bounds = ([-0.120, -0.120, 0, -10, -10, -10],[0.120, 0.120, 0.1, 10, 10, 10])   # initial_guess의 제약 설정
 
-    result_pos = least_squares(residuals, initial_guess, bounds=bounds)    # Levenberg-Marquardt Algorithm 계산
+    result_pos = least_squares(residuals, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
     
     result = np.array([result_pos.x[0], result_pos.x[1], result_pos.x[2]])  # 위치 근사값만 따로 저장
     pprint.pprint(result * 1000)                          # 위치 근사값 출력

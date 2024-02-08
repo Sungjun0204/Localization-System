@@ -15,7 +15,8 @@ import pprint
 
 # 전역변수 선언
 zero_setting_flag = 0           # 4~5번 뒤에 offset을 작동시키기 위한 flag변수 선언
-first_value = np.array([0.118, -0.118, 0.065, 0.33, 0.33, 0.34]) # 0~2번째는 위치 초기 값, 3~5번째는 자계강도(H) 초기 값
+first_value = np.array([0.118, -0.118, 0.065]) # 위치 초기 값
+first_m = np.array([0.20, 0.20, 0.20])         # 자계강도 초기값
 #first_value = np.array([118, -118, 65, 0.33, 0.33, 0.34])
 full_packet = ""                # 패킷 값을 저장하는 리스트 변수
 sensor_data = []                # 해체작업을 진행할 패킷 값을 저장하는 리스트 변수
@@ -128,7 +129,7 @@ def parse_packet(packet):
         sensor_values = [parse_value(value) for value in sensor_str.split(',')]
         raw_sum += sum(sensor_values)  # 가공 전 원본 데이터 합산
         sensor_values[0] *= -1
-        sensor_values = [v / 100000.0 for v in sensor_values]  # UART통신을 위해 없앴던 소수점 부활 (/100)
+        sensor_values = [v / 10.0 for v in sensor_values]  # UART통신을 위해 없앴던 소수점 부활 (/100)
                                                                 # hall seneor는 단위가 uT이므로, mT로 단위 통일 (/1000)
                                                                 # 따라서 100,000을 나눠준다
         sensors_data.append(sensor_values)
@@ -181,13 +182,14 @@ def offset_Setting():
     ### 본격적인 위치추정 코드 ###
     initial_guess = first_value    # 초기 자석의 위치좌표 및 자계강도 값
 
-    result_pos = least_squares(residuals, initial_guess)    # Levenberg-Marquardt Algorithm 계산
+    result_pos = least_squares(residuals, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
     
     result = np.array([result_pos.x[0], result_pos.x[1], result_pos.x[2]])  # 위치 근사값만 따로 저장
-    pprint.pprint(result)                          # 위치 근사값 출력
-    
+    #pprint.pprint(result)                          # 위치 근사값 출력
+    print(result_pos)
+
     # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
-    for i in range(6):
+    for i in range(3):
         first_value[i] = result_pos.x[i]
 
 
@@ -195,14 +197,33 @@ def offset_Setting():
 
 
 
+# 측정한 자기장 값과 계산한 자기장 값 사이의 차이를 계산하는 함수
+# 여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌
+def residuals(init_pos):
+    global array_Val, P
+    differences = [0,0,0] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
+
+    # 위치에 대한 잔차 값의 총합 저장
+    for i in range(9):
+        buffer_residual = (array_Val[i] - (cal_B(init_pos, P[i])))  # 실제값과 이론값 사이의 잔차 계산
+        differences[0] += buffer_residual[0]    # 각 센서들의 잔차를 각 축 성분끼리 더한다
+        differences[1] += buffer_residual[1]
+        differences[2] += buffer_residual[2]
+
+
+    #pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
+    return differences
+
+
 
 
 # 자석의 자기밀도를 계산하는 함수 
 # A: 자석의 현재 위치좌표, P: 센서의 위치좌표, H: 자석의 자계강도
-def cal_B(A_and_H, P):
-    global MU, M_T
-    A = [A_and_H[0], A_and_H[1], A_and_H[2]]    # 위치 값 따로 A 리스트에 저장
-    H = [A_and_H[3], A_and_H[4], A_and_H[5]]    # 자계강도 값 따로 H 리스트에 저장
+def cal_B(A, P):
+    global MU, M_T, first_m
+    #A = [A_and_H[0], A_and_H[1], A_and_H[2]]    # 위치 값 따로 A 리스트에 저장
+    #H = [A_and_H[3], A_and_H[4], A_and_H[5]]    # 자계강도 값 따로 H 리스트에 저장
+    H = first_m
 
     N_t = ((MU / MU0) * MU0 * M_T) / (4*(np.pi))    # 상수항 계산
     
@@ -225,23 +246,6 @@ def h_dot_p(A, H, P):
 
 
 
-
-# 측정한 자기장 값과 계산한 자기장 값 사이의 차이를 계산하는 함수
-# 여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌
-def residuals(init_pos):
-    global array_Val, P, first_value
-    differences = [0,0,0] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
-
-    # 위치에 대한 잔차 값의 총합 저장
-    for i in range(9):
-        buffer_residual = (array_Val[i] - (cal_B(init_pos, P[i])))  # 실제값과 이론값 사이의 잔차 계산
-        differences[0] += buffer_residual[0]    # 각 센서들의 잔차를 각 축 성분끼리 더한다
-        differences[1] += buffer_residual[1]
-        differences[2] += buffer_residual[2]
-
-
-    #pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
-    return differences
 
 
 
