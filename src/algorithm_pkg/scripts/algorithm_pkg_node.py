@@ -15,9 +15,9 @@ import pprint
 
 # 전역변수 선언
 zero_setting_flag = 0           # 4~5번 뒤에 offset을 작동시키기 위한 flag변수 선언
-first_value = np.array([0.118, -0.118, 0.065]) # 위치 초기 값
-first_m = np.array([0.20, 0.20, 0.20])         # 자계강도 초기값
-#first_value = np.array([118, -118, 65, 0.33, 0.33, 0.34])
+#first_value = np.array([0.118, -0.118, 0.065]) # 위치 초기 값
+#first_m = np.array([0.30, 0.30, 0.30])         # 자계강도 초기값
+first_value = np.array([0.118, -0.118, 0.065, 502.3, 502.3])
 full_packet = ""                # 패킷 값을 저장하는 리스트 변수
 sensor_data = []                # 해체작업을 진행할 패킷 값을 저장하는 리스트 변수
 packet_count = 0                       # 분할되어 들어오는 패킷을 총 10번만 받게 하기 위해 카운트를 세는 변수
@@ -130,8 +130,8 @@ def parse_packet(packet):
         raw_sum += sum(sensor_values)  # 가공 전 원본 데이터 합산
         sensor_values[0] *= -1
         sensor_values = [v / 10.0 for v in sensor_values]  # UART통신을 위해 없앴던 소수점 부활 (/100)
-                                                                # hall seneor는 단위가 uT이므로, mT로 단위 통일 (/1000)
-                                                                # 따라서 100,000을 나눠준다
+                                                                # hall seneor는 단위가 G이므로, mT로 단위 통일 (*10)
+                                                                # 따라서 10을 나눠준다
         sensors_data.append(sensor_values)
 
     checksum_str = packet[packet.find('i') + 1:packet.find('Y')]
@@ -140,7 +140,7 @@ def parse_packet(packet):
     if raw_sum != checksum:
         return 0
 
-    #pretty_print(sensors_data)  # 패킷에서 분리한 raw data 값 확인
+    # pretty_print(sensors_data)  # 패킷에서 분리한 raw data 값 확인
     return sensors_data
 
 
@@ -177,7 +177,7 @@ def offset_Setting():
     ## command = "clear"
     ## subprocess.call(command, shell=True)
 
-    array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
+    # array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
     
     ### 본격적인 위치추정 코드 ###
     initial_guess = first_value    # 초기 자석의 위치좌표 및 자계강도 값
@@ -185,11 +185,11 @@ def offset_Setting():
     result_pos = least_squares(residuals, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
     
     result = np.array([result_pos.x[0], result_pos.x[1], result_pos.x[2]])  # 위치 근사값만 따로 저장
-    #pprint.pprint(result)                          # 위치 근사값 출력
+    #pprint.pprint(result * 1000)                          # 위치 근사값 출력
     print(result_pos)
 
     # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
-    for i in range(3):
+    for i in range(5):
         first_value[i] = result_pos.x[i]
 
 
@@ -201,7 +201,7 @@ def offset_Setting():
 # 여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌
 def residuals(init_pos):
     global array_Val, P
-    differences = [0,0,0] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
+    differences = [0,0,0,0,0,0] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
 
     # 위치에 대한 잔차 값의 총합 저장
     for i in range(9):
@@ -209,7 +209,8 @@ def residuals(init_pos):
         differences[0] += buffer_residual[0]    # 각 센서들의 잔차를 각 축 성분끼리 더한다
         differences[1] += buffer_residual[1]
         differences[2] += buffer_residual[2]
-
+    differences[3] = init_pos[3]
+    differences[4] = init_pos[4]
 
     #pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
     return differences
@@ -219,11 +220,16 @@ def residuals(init_pos):
 
 # 자석의 자기밀도를 계산하는 함수 
 # A: 자석의 현재 위치좌표, P: 센서의 위치좌표, H: 자석의 자계강도
-def cal_B(A, P):
-    global MU, M_T, first_m
-    #A = [A_and_H[0], A_and_H[1], A_and_H[2]]    # 위치 값 따로 A 리스트에 저장
-    #H = [A_and_H[3], A_and_H[4], A_and_H[5]]    # 자계강도 값 따로 H 리스트에 저장
-    H = first_m
+def cal_B(A_and_H, P):
+    global MU, M_T # first_m
+    A = [A_and_H[0], A_and_H[1], A_and_H[2]]    # 위치 값 따로 A 리스트에 저장
+    H = [A_and_H[3], A_and_H[4]]; H.insert(0, 1-(H[0]**2)-(H[1]**2))    # 자계강도 값 따로 H 리스트에 저장
+    
+    # 먼저 H를 정규화시켜야 함
+    H_norm = np.linalg.norm(H)
+    H = [H[0]/H_norm, H[1]/H_norm, H[2]/H_norm]
+
+    # H = first_m
 
     N_t = ((MU / MU0) * MU0 * M_T) / (4*(np.pi))    # 상수항 계산
     
@@ -233,7 +239,7 @@ def cal_B(A, P):
     b_z = N_t * (((3*h_dot_p(A, H, P))*(P[2]-A[2]) / (distance_3d(P,A) ** 5)) - ((H[2]) / (distance_3d(P,A) ** 3)))
 
     #print([b_x, b_y, b_z])
-    return [b_x, b_y, b_z]           # 최종 자기밀도 값 반환
+    return [b_x, b_y, b_z]            # 최종 자기밀도 값 반환
 
 # 두 점 사이의 거리를 구하는 함수
 def distance_3d(point1, point2):
@@ -242,8 +248,6 @@ def distance_3d(point1, point2):
 # H dot P의 값을 계산하는 함수
 def h_dot_p(A, H, P):
     return (H[0]*(P[0]-A[0])) + (H[1]*(P[1]-A[1])) + (H[2]*(P[2]-A[2]))
-
-
 
 
 
