@@ -17,7 +17,7 @@ import pprint
 zero_setting_flag = 0           # 4~5번 뒤에 offset을 작동시키기 위한 flag변수 선언
 #first_value = np.array([0.118, -0.118, 0.065]) # 위치 초기 값
 #first_m = np.array([0.30, 0.30, 0.30])         # 자계강도 초기값
-first_value = np.array([0.118, -0.118, 0.065, 502.3, 502.3])
+first_value = [0.118, -0.118, 0.065, 5023, 5023, 0]
 full_packet = ""                # 패킷 값을 저장하는 리스트 변수
 sensor_data = []                # 해체작업을 진행할 패킷 값을 저장하는 리스트 변수
 packet_count = 0                       # 분할되어 들어오는 패킷을 총 10번만 받게 하기 위해 카운트를 세는 변수
@@ -62,6 +62,7 @@ M0 = 1.320 / MU0             # 사용하는 자석의 등급에 따른 값[A/m]:
 #M_T = (np.pi)*(4.7625**2)*(12.7)*M0    # 자석의 자화벡터 값 = pi*(반지름^2)*(높이)*(자석 등급)
 M_T = (np.pi)*(0.0047625**2)*(0.0127)*M0
 
+flag = 0    # 알고리즘 첫 시작 때만 H벡터 정규화 진행을 하기 위한 플래그변수 선언
 np.set_printoptions(precision=5, suppress=True)    # 배열 변수 출력 시 소수점 아래 5자리까지만 출력되도록 설정
 
 
@@ -168,19 +169,19 @@ def zero_setting():
 
 # offset 적용하는 함수
 def offset_Setting():
-    global array_Val, zero_Val, first_value
-    result = [0, 0, 0]
-
-    #pprint.pprint(first_value)
-
-    ### 출력 log 없이 한 줄로만 출력하고 싶을 때 사용 ###
-    ## command = "clear"
-    ## subprocess.call(command, shell=True)
+    global array_Val, zero_Val, first_value, flag
 
     # array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
     
     ### 본격적인 위치추정 코드 ###
     initial_guess = first_value    # 초기 자석의 위치좌표 및 자계강도 값
+    
+    # 먼저 H를 정규화시켜야 함
+    if(flag == 0):        # 알고리즘 첫 시작에만 정규화시키면 됨. 이 후로는 알아서 정규화 값을 기준으로 값을 추정할 것임
+        initial_guess[5] = ((-1)*(initial_guess[3]*initial_guess[4]) / (initial_guess[3]+initial_guess[4]))  # Z값을 조건에 맞게 계산 후 대입 (m^2 + n^2 + p^2 = 1)
+        H_norm = np.linalg.norm(initial_guess[3:6])
+        initial_guess[3:6] = np.array(initial_guess[3:6]) / H_norm
+        flag = 1
 
     result_pos = least_squares(residuals, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
     
@@ -189,7 +190,7 @@ def offset_Setting():
     print(result_pos)
 
     # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
-    for i in range(5):
+    for i in range(6):
         first_value[i] = result_pos.x[i]
 
 
@@ -200,17 +201,16 @@ def offset_Setting():
 # 측정한 자기장 값과 계산한 자기장 값 사이의 차이를 계산하는 함수
 # 여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌
 def residuals(init_pos):
-    global array_Val, P
+    global array_Val, P, first_value
     differences = [0,0,0,0,0,0] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
 
     # 위치에 대한 잔차 값의 총합 저장
     for i in range(9):
-        buffer_residual = (array_Val[i] - (cal_B(init_pos, P[i])))  # 실제값과 이론값 사이의 잔차 계산
+        buffer_residual = (array_Val[i] - np.array(cal_B(init_pos, P[i]))[:3])  # 실제값과 이론값 사이의 잔차 계산
         differences[0] += buffer_residual[0]    # 각 센서들의 잔차를 각 축 성분끼리 더한다
         differences[1] += buffer_residual[1]
         differences[2] += buffer_residual[2]
-    differences[3] = init_pos[3]
-    differences[4] = init_pos[4]
+    differences[3:6] = first_value[3:6]
 
     #pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
     return differences
@@ -223,11 +223,7 @@ def residuals(init_pos):
 def cal_B(A_and_H, P):
     global MU, M_T # first_m
     A = [A_and_H[0], A_and_H[1], A_and_H[2]]    # 위치 값 따로 A 리스트에 저장
-    H = [A_and_H[3], A_and_H[4]]; H.insert(0, 1-(H[0]**2)-(H[1]**2))    # 자계강도 값 따로 H 리스트에 저장
-    
-    # 먼저 H를 정규화시켜야 함
-    H_norm = np.linalg.norm(H)
-    H = [H[0]/H_norm, H[1]/H_norm, H[2]/H_norm]
+    H = [A_and_H[3], A_and_H[4], A_and_H[5]]    # 자계강도 값 따로 H 리스트에 저장    
 
     # H = first_m
 
@@ -239,7 +235,7 @@ def cal_B(A_and_H, P):
     b_z = N_t * (((3*h_dot_p(A, H, P))*(P[2]-A[2]) / (distance_3d(P,A) ** 5)) - ((H[2]) / (distance_3d(P,A) ** 3)))
 
     #print([b_x, b_y, b_z])
-    return [b_x, b_y, b_z]            # 최종 자기밀도 값 반환
+    return [b_x, b_y, b_z, H[0], H[1], H[2]]            # 최종 자기밀도 값 반환
 
 # 두 점 사이의 거리를 구하는 함수
 def distance_3d(point1, point2):
@@ -248,7 +244,6 @@ def distance_3d(point1, point2):
 # H dot P의 값을 계산하는 함수
 def h_dot_p(A, H, P):
     return (H[0]*(P[0]-A[0])) + (H[1]*(P[1]-A[1])) + (H[2]*(P[2]-A[2]))
-
 
 
 
@@ -268,10 +263,6 @@ def main():
 
 
     rospy.spin()    # node 무한 반복
-
-
-
-
 
 
 if __name__ == '__main__':
