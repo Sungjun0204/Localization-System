@@ -26,8 +26,8 @@ array_Val = np.array([  [0, 0, 0],
                         [0, 0, 0],
                         [0, 0, 0],
                         [0, 0, 0],
-                        [0, 0, 0] ])     # sensor 값들의 numpy조작을 간편하게 하기 위해
-                                         # 옮겨 저장할 배열 변수 선언
+                        [0, 0, 0] ])    # sensor 값들의 numpy조작을 간편하게 하기 위해 옮겨 저장할 배열 변수 선언
+
 zero_Val = np.array([   [0, 0, 0],
                         [0, 0, 0],
                         [0, 0, 0],
@@ -167,15 +167,10 @@ def offset_Setting():
     global array_Val, zero_Val, first_value
     result = [0, 0, 0]
 
-    ### 출력 log 없이 한 줄로만 출력하고 싶을 때 사용 ###
-    ## command = "clear"
-    ## subprocess.call(command, shell=True)
-
-    array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
+    # array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
     
     ### 본격적인 위치추정 코드 ###
     initial_guess = first_value    # 초기 자석의 위치좌표 및 자계강도 값
-    bounds = ([-0.120, -0.120, 0, -10, -10, -10],[0.120, 0.120, 0.1, 10, 10, 10])   # initial_guess의 제약 설정
 
     result_pos = least_squares(residuals, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
     
@@ -195,12 +190,12 @@ def offset_Setting():
 # (여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌)
 def residuals(init_pos):
     global array_Val, P, first_value
-    differences = [0,0,0] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
+    differences = [] # (센서 값)과 (계산 값) 사이의 잔차 값을 저장하는 배열변수 초기화
     val =  [[array_Val[0],array_Val[1],array_Val[2]],
             [array_Val[3],array_Val[4],array_Val[5]],
             [array_Val[6],array_Val[7],array_Val[8]]]        # 센서 값을 3x3 형태로 다시 저장(for 계산 용이)
     k_ij = []     # K(i,j) 값을 저장할 리스트 변수 초기화
-    hh = 0.118       # 센서들 사이 떨어져있는 거리
+    hh = 0.118       # 센서들 사이 떨어져있는 거리 h 초기화
 
     # K_ij 값 계산
     for i in range(3):
@@ -211,13 +206,13 @@ def residuals(init_pos):
             param[2]=0 if i-1 < 0 else val[i-1][j][2]
             param[3]=0 if i+1 > 2 else val[i+1][j][2]
             param[4]=(-4)*(val[i][j][2])
+            
+            k_ij.append( (-1)*(sum(param) / (hh**2)) )  # K_ij 배열에 하나씩 추가
 
-            k_ij.append( (-1)*(sum(param) / (hh**2)) )
-    
     # 위치에 대한 잔차 값의 총합 저장
     for i in range(9):
         buffer_residual = k_ij[i] - cal_BB(init_pos, P[i])  # 실제값과 이론값 사이의 잔차 계산
-        differences += buffer_residual    # 각 센서들의 잔차를 각 축 성분끼리 더한다
+        differences.append(buffer_residual)    # 각 센서들의 잔차 값을 differences 배열에 삽입
 
     #pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
     return differences
