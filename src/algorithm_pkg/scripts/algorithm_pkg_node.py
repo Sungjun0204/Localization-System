@@ -22,6 +22,8 @@ import signal
 # 전역변수 선언
 zero_setting_flag = 0           # 4~5번 뒤에 offset을 작동시키기 위한 flag변수 선언*-
 first_value = [0.0, 0.0, 0.065, 1050000, 1050000, 0]
+# first_value = [0.118, 0.0, 0.065, 1050000, 1050000, 0]
+
 full_packet = ""                # 패킷 값을 저장하는 리스트 변수
 sensor_data = []                # 해체작업을 진행할 패킷 값을 저장하는 리스트 변수
 packet_count = 0                       # 분할되어 들어오는 패킷을 총 10번만 받게 하기 위해 카운트를 세는 변수
@@ -37,7 +39,7 @@ data_matrix = np.zeros((3, sample_size))    # MAF를 위한 smapling data를 저
 index_maf = 0                               # FIFO 방식을 위한 포인터
 
 ## 필터 알고리즘 선택 변수 ##
-filter_select = 2                           # 1:MAF | 2:UKF | 
+filter_select = 1                           # 1:MAF | 2:UKF | 
 
 
 ## 센서값 저장 관련 변수 ##
@@ -225,9 +227,9 @@ def offset_Setting():
         # print(lma_result * 100)
         # print("... Measuring ...")
         
-        # # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
-        # for i in range(6):
-        #     first_value[i] = result_pos.x[i]
+        # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
+        for i in range(6):
+            first_value[i] = result_pos.x[i]
         
         
         
@@ -266,7 +268,7 @@ def offset_Setting():
             if(filter_flag == True):            # filter_flag가 켜지면 해당 함수 실행
                 for i in range(3):
                     result[i] = maf_func(data_matrix[i])
-                print(result)
+                # print(result)
         
         #### filter select 2: UKF ####
         elif(filter_select == 2):
