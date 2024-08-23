@@ -3,7 +3,7 @@
 
 import rospy
 from sensor_msgs.msg import PointCloud
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32MultiArray
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 
@@ -22,7 +22,7 @@ packet_count = 0                # 분할되어 들어오는 패킷을 총 10번�
 is_collecting = False           #         
 result = [0,0,0]                # 최종적으로 추정한 위치 값을 저장하는 리스트 변수 선언
 flag = 0                        # 알고리즘 첫 시작 때만 H벡터 정규화 진행을 하기 위한 플래그변수 선언
-
+cmag_final = np.array([0,0,0,0,0])  # c mag mns에서 생성하는 자기장 값 계산
 
 array_Val = np.array([  [0, 0, 0],
                         [0, 0, 0],
@@ -157,6 +157,14 @@ def parse_packet(packet):
 
 
 
+# c mag mns가 발생하는 자기장 값 구독하는 함수
+def cmag(data):
+    global cmag_final
+    cmag_final[0] = data.data[0]
+    cmag_final[1] = data.data[1]
+    cmag_final[2] = data.data[2]
+    cmag_final[3] = 0
+    cmag_final[4] = 0
 
 
 
@@ -217,7 +225,7 @@ def offset_Setting():
 # 측정한 자기장 값과 계산한 자기장 값 사이의 차이를 계산하는 함수
 # (여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌)
 def residuals(init_pos):
-    global array_Val, P, first_value
+    global array_Val, P, first_value, cmag_final
     differences = []                        # (센서 값)과 (계산 값) 사이의 잔차 값을 저장하는 리스트변수 초기화
 
     val = array_Val.reshape(3,3,3)           # 센서 값을 3x3 형태로 다시 저장(for 계산 용이)
@@ -284,8 +292,10 @@ def main():
     pub = rospy.Publisher('visualization_marker', Marker, queue_size=10) # 최종 추정한 자석의 위치좌표
 
     #### 메세지 구독 설정 구간 ####
+    
     rospy.Subscriber('read', String, seperating_Packet)   # /read를 구독하고 seperating_Packet 함수 호출: 패킷 처리 함수
     rospy.Subscriber('Is_offset', String, callback_offset)  # /Is_offset을 구독하고 callback_offset 함수 호출
+    
 
     rate = rospy.Rate(1000)  # 10Hz
 

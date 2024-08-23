@@ -3,7 +3,7 @@
 
 import rospy
 import tf
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32MultiArray
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 
@@ -31,6 +31,12 @@ is_collecting = False
 lma_result = [0,0,0]             # 최종적으로 LMA 추정한 위치 값을 저장하는 리스트 변수 선언
 result = [0,0,0]                 # 필터링까지 마친 최종 위치 값을 저장하는 리스트 변수 선언
 filter_flag = False              # LMA추정이 완료되어 이후 필터링 작업을 시작하기 위한 플래그 변수
+mns_coordi = [0,0,0]             # MNS의 좌표값을 저장하는 배열 변수 초기화
+mns_coordi = np.array(mns_coordi)
+mns_b = [0,0,0]                  # MNS의 자기밀도 값을 저장하는 배열 변수 초기화
+mns_b = np.array(mns_b)
+
+
 
 ## MAF 관련 변수 ##
 sample_size = 20                           # MAF의 sampling data의 갯수 설정
@@ -39,7 +45,7 @@ data_matrix = np.zeros((3, sample_size))    # MAF를 위한 smapling data를 저
 index_maf = 0                               # FIFO 방식을 위한 포인터
 
 ## 필터 알고리즘 선택 변수 ##
-filter_select = 1                           # 1:MAF | 2:UKF | 
+filter_select = 2                           # 1:MAF | 2:UKF | 
 
 
 ## 센서값 저장 관련 변수 ##
@@ -87,7 +93,7 @@ signal.signal(signal.SIGINT, signal_handler)
 
 # 함수 선언
 
-
+#####################################################################################################################
 #################################################### 통신 관련 함수 ####################################################
 
 # Serial_example_node.cpp를 통해 받은 패킷을 처리하는 함수
@@ -163,11 +169,27 @@ def parse_packet(packet):
     # pretty_print(sensors_data)  # 패킷에서 분리한 raw data 값 확인
     return sensors_data
 
-######################################################################################################################
+#####################################################################################################################
+#####################################################################################################################
 
 
 
+# MNS의 좌표 값을 별도의 변수에 저장하는 callback 함수
+def scara_coordi_callback(data):
+    global mns_coordi
 
+    mns_coordi[0] = data.data[0]
+    mns_coordi[1] = data.data[1]
+    mns_coordi[2] = data.data[2]
+
+
+# C-Mag MNS가 생성하는 자기밀도 값을 받아오는 callback 함수
+def c_mag_b_callback(data):
+    global mns_b
+
+    mns_b[0] = data.data[0]
+    mns_b[1] = data.data[1]
+    mns_b[2] = data.data[2]
 
 
 
@@ -192,7 +214,8 @@ def zero_setting():
 
 # offset 적용하는 함수
 def offset_Setting():
-    global array_Val, zero_Val, first_value, flag, lma_result, filter_flag, result, sample_size, maf_first, data_matrix, index_maf, filter_select
+    global array_Val, zero_Val, first_value, flag, lma_result, filter_flag
+    global result, sample_size, maf_first, data_matrix, index_maf, filter_select
     
     array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
     
@@ -225,11 +248,11 @@ def offset_Setting():
         
         # pprint.pprint(result * 100)                    # 위치 근사값 출력
         # print(lma_result * 100)
-        # print("... Measuring ...")
+        print("... Measuring ...")
         
         # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
-        for i in range(6):
-            first_value[i] = result_pos.x[i]
+        # for i in range(6):
+        #     first_value[i] = result_pos.x[i]
         
         
         
@@ -237,12 +260,12 @@ def offset_Setting():
         #### LMA 추정 이후 필터를 적용하는 코드 ####
         ######################################
 
-        #### filter select 0: Any Filtering ####
-        if(filter_select == 0):
+        #### filter select 1: Any Filtering ####
+        if(filter_select == 1):
             for i in range(6):
                 first_value[i] = result_pos.x[i]
 
-            result = first_value[:3]   # rviz에 띄위기 위해 위치값만 따로 저장
+            # result = first_value[:3]   # rviz에 띄위기 위해 위치값만 따로 저장
         
         #### filter select 1: MAF ####
         if(filter_select == 1):
@@ -270,7 +293,11 @@ def offset_Setting():
                     result[i] = maf_func(data_matrix[i])
                 # print(result)
         
+
+
+        ##############################
         #### filter select 2: UKF ####
+        ##############################
         elif(filter_select == 2):
             # 상태 차원과 측정 차원 설정
             dim_x = 6  # 상태변수 차원 (x, y, z 위치, bx, by, bz 자기밀도)
@@ -286,7 +313,7 @@ def offset_Setting():
             ukf.P *= np.cov(first_value - lma_result)          # 초기 상태 추정치의 불확실성(초기값에서 측정값 뺀 값)
             ukf.R = np.eye(dim_z) * 1.0  # 관측 노이즈
             # ukf.Q = np.eye(dim_x) * 0.4  # 프로세스 노이즈
-            ukf.Q = np.diag([0.01, 0.01, 0.01, 100, 100, 100])
+            ukf.Q = np.diag([10, 10, 10, 100, 100, 100])
 
             # 예제 측정 업데이트
             z = lma_result[:6]               # 측정 값으로 LMA 최종 추정값을 가져옴
@@ -387,32 +414,36 @@ def maf_func(samples):
 # 메인 함수
 def main():
 
-    global array_Val, result, P
+    global array_Val, result, P, mns_coordi
 
 
     rospy.init_node('algorithm_pkg_node', anonymous=True)   # 해당 노드 기본 설정
     
     #### 메세지 발행 설정 구간 ####
-    pub = rospy.Publisher('visualization_marker', Marker, queue_size=10)   # 최종 추정한 자석의 위치좌표
-    pub2 = rospy.Publisher('sensors_marker', Marker, queue_size=10)  # 센서 위치 좌표
+    pub_mag    = rospy.Publisher('visualization_marker', Marker, queue_size=10)   # 최종 추정한 자석의 위치좌표
+    pub_mns    = rospy.Publisher('mns_marker', Marker, queue_size=10)      # MNS의 위치좌표
+    pub_sensor = rospy.Publisher('sensors_marker', Marker, queue_size=10)  # 센서 위치 좌표
 
     #### 메세지 구독 설정 구간 ####
+    rospy.Subscriber('scara_coordi', Float32MultiArray, scara_coordi_callback) # /scara_coordi를 구독하고 scara_coordi_callback 함수 호출
+    rospy.Subscriber('c_mag_b', Float32MultiArray, c_mag_b_callback) # /c_mag_b를 구독하고 c_mag_b_callback 함수 호출
     rospy.Subscriber('read', String, seperating_Packet)   # /read를 구독하고 seperating_Packet 함수 호출: 패킷 처리 함수
     rospy.Subscriber('Is_offset', String, callback_offset)  # /Is_offset을 구독하고 callback_offset 함수 호출
 
-    rate = rospy.Rate(100)  # 100Hz
+    rate = rospy.Rate(10)  # 100Hz
 
 
     #### 메인 반복문 ####
     while (not rospy.is_shutdown()):
+        # 추정된 자석의 위치 마커 생성
         marker = Marker()
         marker.header = Header(frame_id="map", stamp=rospy.Time.now())
         marker.ns = "my_namespace"
         marker.id = 0
         marker.type = Marker.SPHERE
         marker.action = Marker.ADD
-        marker.pose.position.x = result[0] * 100
-        marker.pose.position.y = result[1] * 100
+        marker.pose.position.x = -result[1] * 100
+        marker.pose.position.y = result[0] * 100
         marker.pose.position.z = 0#result[2]
         marker.pose.orientation.x = 0.0
         marker.pose.orientation.y = 0.0
@@ -425,31 +456,63 @@ def main():
         marker.color.r = 1.0  # 마커의 색상
         marker.color.g = 0.0
         marker.color.b = 0.0
-        pub.publish(marker)
+        pub_mag.publish(marker)
+
+        # 넘겨받은 MNS의 위치 마커 생성
+        marker2 = Marker()
+        marker2.header = Header(frame_id="map", stamp=rospy.Time.now())
+        marker2.ns = "my_namespace"
+        marker2.id = 0
+        marker2.type = Marker.SPHERE
+        marker2.action = Marker.ADD
+        marker2.pose.position.x = mns_coordi[0]
+        marker2.pose.position.y = mns_coordi[1]
+        marker2.pose.position.z = 0#result[2]
+        marker2.pose.orientation.x = 0.0
+        marker2.pose.orientation.y = 0.0
+        marker2.pose.orientation.z = 0.0
+        marker2.pose.orientation.w = 1.0
+        marker2.scale.x = 5  # 마커의 크기
+        marker2.scale.y = 5
+        marker2.scale.z = 5
+        marker2.color.a = 1.0  # 마커의 투명도
+        marker2.color.r = 0.5  # 마커의 색상
+        marker2.color.g = 0.3
+        marker2.color.b = 0.4
+        pub_mns.publish(marker2)
 
         # 각 센서 위치에 대한 마커 발행
         for i, point in enumerate(P * 1000):
-            marker = Marker()
-            marker.header = Header(frame_id="map", stamp=rospy.Time.now())
-            marker.ns = "my_namespace"
-            marker.id = i
-            marker.type = Marker.CUBE
-            marker.action = Marker.ADD
-            marker.pose.position.x = point[0]
-            marker.pose.position.y = point[1]
-            marker.pose.position.z = point[2]-5
-            marker.pose.orientation.x = 0.0
-            marker.pose.orientation.y = 0.0
-            marker.pose.orientation.z = 0.0
-            marker.pose.orientation.w = 1.0
-            marker.scale.x = 5  # 점 크기
-            marker.scale.y = 5
-            marker.scale.z = 5
-            marker.color.a = 1.0  # 점 투명도
-            marker.color.r = 0.6  # 연두색 설정
-            marker.color.g = 1.0
-            marker.color.b = 0.2
-            pub2.publish(marker)
+            marker3 = Marker()
+            marker3.header = Header(frame_id="map", stamp=rospy.Time.now())
+            marker3.ns = "my_namespace"
+            marker3.id = i
+            marker3.type = Marker.CUBE
+            marker3.action = Marker.ADD
+            marker3.pose.position.x = point[0]
+            marker3.pose.position.y = point[1]
+            marker3.pose.position.z = point[2]-5
+            marker3.pose.orientation.x = 0.0
+            marker3.pose.orientation.y = 0.0
+            marker3.pose.orientation.z = 0.0
+            marker3.pose.orientation.w = 1.0
+            marker3.scale.x = 5  # 마커 크기
+            marker3.scale.y = 5
+            marker3.scale.z = 5
+
+            # 마커 색상 설정
+            if i <= 6:  # 0~6번 마커는 녹색
+                marker3.color.r = 0.6
+                marker3.color.g = 1.0
+                marker3.color.b = 0.2
+            else:  # 7~8번 마커는 파란색
+                marker3.color.r = 0.0
+                marker3.color.g = 0.0
+                marker3.color.b = 1.0
+
+            marker3.color.a = 1.0  # 마커 투명도
+            pub_sensor.publish(marker3)
+
 
         rate.sleep()
 

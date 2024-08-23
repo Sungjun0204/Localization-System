@@ -1,6 +1,6 @@
 <launch>
     <node pkg="serial_example" type="listener" name="sensor_packet_node"/>
-    <node pkg="serial_example" type="serial_example_node" name="rosserial_node"/>
+    <node pkg="serial_example" type="serial_example_node" name="hall_rosserial_node"/>
 </launch>
 
 <!-- node pkg="해당 노드가 있는 패키지 이름"
