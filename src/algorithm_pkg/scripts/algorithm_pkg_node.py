@@ -21,8 +21,8 @@ import signal
 
 # 전역변수 선언
 zero_setting_flag = 0           # 4~5번 뒤에 offset을 작동시키기 위한 flag변수 선언*-
-first_value = [0.0, 0.0, 0.065, 1050000, 1050000, 0]
-# first_value = [0.118, 0.0, 0.065, 1050000, 1050000, 0]
+first_value = [0.0, 0.0, 0.065, 1050000, 1050000, 0]           # 엘버타 대학 논문 기준의 초기값
+# first_value = [0.0, 0.0, 0.065, 4.509, 4.509, 0]       # 카네기멜론 대학 논문 기준의 초기값
 
 full_packet = ""                # 패킷 값을 저장하는 리스트 변수
 sensor_data = []                # 해체작업을 진행할 패킷 값을 저장하는 리스트 변수
@@ -35,6 +35,8 @@ mns_coordi = [0,0,0]             # MNS의 좌표값을 저장하는 배열 변�
 mns_coordi = np.array(mns_coordi)
 mns_b = [0,0,0]                  # MNS의 자기밀도 값을 저장하는 배열 변수 초기화
 mns_b = np.array(mns_b)
+normalized_mns_b = [0,0,0]       # 정귀화된 MNS 자기밀도 값을 저장하는 배열 변수 초기화
+normalized_mns_b = np.array(normalized_mns_b)
 
 
 
@@ -178,18 +180,29 @@ def parse_packet(packet):
 def scara_coordi_callback(data):
     global mns_coordi
 
-    mns_coordi[0] = data.data[0]
-    mns_coordi[1] = data.data[1]
+    mns_coordi[0] = data.data[0] 
+    mns_coordi[1] = data.data[1] 
     mns_coordi[2] = data.data[2]
 
 
 # C-Mag MNS가 생성하는 자기밀도 값을 받아오는 callback 함수
 def c_mag_b_callback(data):
-    global mns_b
+    global mns_b, MU0
 
-    mns_b[0] = data.data[0]
-    mns_b[1] = data.data[1]
-    mns_b[2] = data.data[2]
+    # H = B/mu0 환산
+    mns_b[0] = data.data[0] / MU0
+    mns_b[1] = data.data[1] / MU0
+    mns_b[2] = data.data[2] / MU0
+
+    # 정규화 진행
+    norm_mns_b = np.linalg.norm(mns_b)
+    if norm_mns_b != 0:
+        mns_b = mns_b / norm_mns_b
+    else:
+        # norm이 0일 때의 처리
+        mns_b = np.zeros_like(mns_b)
+
+
 
 
 
@@ -246,8 +259,7 @@ def offset_Setting():
         # lma_result = [result_pos.x[0], result_pos.x[1], result_pos.x[2]]  # 위치 근사값만 따로 저장
         lma_result = result_pos.x[:6]
         
-        # pprint.pprint(result * 100)                    # 위치 근사값 출력
-        # print(lma_result * 100)
+
         print("... Measuring ...")
         
         # 위치추정을 위한 초기값을 이전에 구한 추정값으로 초기화
@@ -311,9 +323,17 @@ def offset_Setting():
             ukf = UKF(dim_x=dim_x, dim_z=dim_z, dt=dt, fx=fx, hx=hx, points=points)
             ukf.x = first_value[:6]      # 초기 상태 추정치를 마찬가지로 first_value 값을 가져옴
             ukf.P *= np.cov(first_value - lma_result)          # 초기 상태 추정치의 불확실성(초기값에서 측정값 뺀 값)
-            ukf.R = np.eye(dim_z) * 1.0  # 관측 노이즈
+            # ukf.R = np.eye(dim_z) * 1.0  # 관측 노이즈
             # ukf.Q = np.eye(dim_x) * 0.4  # 프로세스 노이즈
-            ukf.Q = np.diag([10, 10, 10, 100, 100, 100])
+            
+            # 엘버타 논문 기준
+            ukf.R = np.diag([900, 900, 900, 20, 20, 20])
+            ukf.Q = np.diag([0.05, 0.05, 0.05, 200, 200, 200])
+            
+            # 카네기멜론 논문 기준
+            # ukf.R = np.diag([0.03, 0.03, 0.03, 0.05, 0.05, 0.05])
+            # ukf.Q = np.diag([0.5, 0.5, 0.5, 0.3, 0.3, 0.3])
+
 
             # 예제 측정 업데이트
             z = lma_result[:6]               # 측정 값으로 LMA 최종 추정값을 가져옴
@@ -349,22 +369,26 @@ def offset_Setting():
 #### 측정한 자기장 값과 계산한 자기장 값 사이의 차이를 계산하는 함수 ####
 # 여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌
 def residuals(init_pos):
-    global array_Val, P
+    global array_Val, P, mns_coordi, mns_b
     differences = [] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
+
+    mns_value = []
+    mns_value.extend(x / 1000 for x in mns_coordi)
+    mns_value.extend(mns_b)
 
     # 위치에 대한 잔차 값의 총합 저장
     for i in range(9):
-        buffer_residual = (array_Val[i] - np.array(cal_B(init_pos, P[i]))[:3])  # 실제값과 이론값 사이의 B값 잔차 계산
+        buffer_residual = (array_Val[i] - np.array(cal_B(mns_value, P[i]))[:3] - np.array(cal_B(init_pos, P[i]))[:3])  # 실제값과 이론값 사이의 B값 잔차 계산
         differences.extend(buffer_residual)    # 각 센서들의 잔차를 순서대로 잔차배열에 삽입
         
         normalized_B = array_Val[i] / np.linalg.norm(array_Val[i])   # 측정한 자기장 값을 정규화
-        differences.extend(normalized_B - np.array(cal_B(init_pos, P[i]))[3:6])     # 정규화된 측정 자기장 값과 예상 자기장 값 사이의 차이 계산 후 순서대로 잔차배열에 삽입
+        differences.extend(normalized_B - np.array(cal_B(mns_value, P[i]))[3:6] - np.array(cal_B(init_pos, P[i]))[3:6])     # 정규화된 측정 자기장 값과 예상 자기장 값 사이의 차이 계산 후 순서대로 잔차배열에 삽입
 
     # print(differences)
     return differences    # 최종적으로 6x9=54개의 잔차값이 저장된 리스트를 반환
 
 
-
+############ 엘버타 대학 논문 기준 ############
 #### 자석의 자기밀도를 계산하는 함수 ####
 # A: 자석의 현재 위치좌표, P: 센서의 위치좌표, H: 자석의 자계강도
 def cal_B(A_and_H, P):
@@ -383,11 +407,75 @@ def cal_B(A_and_H, P):
 
 #### 두 점 사이의 거리를 구하는 함수 ####
 def distance_3d(point1, point2):
-    return np.linalg.norm(point1-point2)
+    if np.linalg.norm(point1-point2) > 0.001:
+        return np.linalg.norm(point1-point2)
+    elif np.linalg.norm(point1-point2) <= 0.001:
+        return 0.001
 
 #### H dot P의 값을 계산하는 함수(논문 식(3)~(5)) ####
 def h_dot_p(A, H, P):
     return (H[0]*(P[0]-A[0])) + (H[1]*(P[1]-A[1])) + (H[2]*(P[2]-A[2]))
+
+
+
+
+
+############ 카네기멜론 대학 논문 기준 ############
+def residuals2(init_pos):
+    global array_Val, P, first_value, cmag_final
+    differences = []                        # (센서 값)과 (계산 값) 사이의 잔차 값을 저장하는 리스트변수 초기화
+
+    val = array_Val.reshape(3,3,3)           # 센서 값을 3x3 형태로 다시 저장(for 계산 용이)
+    k_ij = []                                # K(i,j) 값을 저장할 리스트 변수 초기화
+    hh = 0.118                               # 센서들 사이 떨어져있는 거리 h 초기화 (단위:m)
+    k = 0                                    # k_ij 리스트의 index 변수 초기화
+
+    # 각 센서마다 K_ij 값 계산 (논문의 식 11) -> 총 9개의 K_ij값이 계산됨
+    # 센서 배열이 3x3이므로, 0보다 작거나 2보다 크면 해당 센서 위치의 값은 0으로 처리
+    for i in range(3):
+        for j in range(3):
+            param = [0,0,0,0,0]
+            param[0]=0 if j-1 < 0 else val[i][j-1][2]
+            param[1]=0 if j+1 > 2 else val[i][j+1][2]
+            param[2]=0 if i-1 < 0 else val[i-1][j][2]
+            param[3]=0 if i+1 > 2 else val[i+1][j][2]
+            param[4]=(-4)*(val[i][j][2])
+            
+            k_ij.append( (-1)*(sum(param) / (hh**2)) )  # K_ij 배열에 하나씩 추가
+
+            buffer_residual = k_ij[k] - cal_BB(init_pos, P[k])  # 실제값과 이론값 사이의 잔차 계산
+            differences.append(buffer_residual)    # 각 센서들의 잔차 값을 differences 배열에 1차원으로 삽입
+            k += 1
+
+    # # 위치에 대한 잔차 값의 총합 저장
+    # for i in range(9):
+    #     buffer_residual = k_ij[i] - cal_BB(init_pos, P[i])  # 실제값과 이론값 사이의 잔차 계산
+    #     differences.append(buffer_residual)    # 각 센서들의 잔차 값을 differences 배열에 1차원으로 삽입
+
+    # pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
+    return differences
+
+
+# 자석의 자기밀도를 계산하는 함수 (논문의 식 15)
+# A: 자석의 현재 위치좌표, P: 센서의 위치좌표, H: 자석의 자계강도
+def cal_BB(A_and_H, P):
+    global MU0
+    A = [A_and_H[0], A_and_H[1], A_and_H[2]]   # 자석의 위치 값 따로 A 리스트에 저장
+    M = [A_and_H[3], A_and_H[4], A_and_H[5]]   # 자석의 자기모멘트 벡터 값 따로 H 리스트에 저장
+    R = np.array(P-A)                          # ij번째 센서와 자석 사이의 거리벡터
+    Rn = np.linalg.norm(R)                     # ij번째 센서와 자석 사이의 거리(norm1)
+
+    const = MU0 / (4*np.pi)     # 상수항 계산
+    b1 = (9*M[2]) / (Rn ** 5)
+    b2 = (45*(R[2])*(np.dot(M,R)+(M[2]*R[2]))) / (Rn ** 7)
+    b3 = (105*(R[2]**3)*(np.dot(M,R))) / (Rn ** 9)
+
+    return const*(b1-b2+b3)
+
+
+
+
+
 
 
 #### Kalman Filter의 상태 천이 행렬을 반환하는 함수 ####
@@ -411,7 +499,10 @@ def maf_func(samples):
 
 
 
-# 메인 함수
+
+
+
+################################### 메인 함수 #######################################
 def main():
 
     global array_Val, result, P, mns_coordi
@@ -465,8 +556,8 @@ def main():
         marker2.id = 0
         marker2.type = Marker.SPHERE
         marker2.action = Marker.ADD
-        marker2.pose.position.x = mns_coordi[0]
-        marker2.pose.position.y = mns_coordi[1]
+        marker2.pose.position.x = mns_coordi[0] 
+        marker2.pose.position.y = mns_coordi[1] 
         marker2.pose.position.z = 0#result[2]
         marker2.pose.orientation.x = 0.0
         marker2.pose.orientation.y = 0.0
