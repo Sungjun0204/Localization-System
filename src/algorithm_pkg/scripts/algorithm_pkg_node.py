@@ -19,10 +19,18 @@ import sys
 import signal
 
 
+## 수동 선택 변수 ##
+FILTER_SELECT = 2                           # 필터 알고리즘 설정 ---------1:MAF | 2:UKF | 
+STANDARD_SELECT = 2                         # 사용하는 수식 출처 설정 ---- 1:엘버타 | 2:카네기멜론
+
+
 # 전역변수 선언
 zero_setting_flag = 0           # 4~5번 뒤에 offset을 작동시키기 위한 flag변수 선언*-
-first_value = [0.0, 0.0, 0.065, 1050000, 1050000, 0]           # 엘버타 대학 논문 기준의 초기값
-# first_value = [0.0, 0.0, 0.065, 4.509, 4.509, 0]       # 카네기멜론 대학 논문 기준의 초기값
+
+if(STANDARD_SELECT == 1):
+    first_value = [0.0, 0.0, 0.065, 1050000, 1050000, 0]           # 엘버타 대학 논문 기준의 초기값
+elif(STANDARD_SELECT == 2):
+    first_value = [0.0, 0.0, 0.065, 1.05, 1.05, 1.05]       # 카네기멜론 대학 논문 기준의 초기값
 
 full_packet = ""                # 패킷 값을 저장하는 리스트 변수
 sensor_data = []                # 해체작업을 진행할 패킷 값을 저장하는 리스트 변수
@@ -45,9 +53,6 @@ sample_size = 20                           # MAF의 sampling data의 갯수 설�
 maf_first = True                            # MAF의 첫 sampling 알고리즘과 그 이후의 알고리즘을 구분하기 위한 flag변수
 data_matrix = np.zeros((3, sample_size))    # MAF를 위한 smapling data를 저장하는 3x100 행렬 선언.
 index_maf = 0                               # FIFO 방식을 위한 포인터
-
-## 필터 알고리즘 선택 변수 ##
-filter_select = 2                           # 1:MAF | 2:UKF | 
 
 
 ## 센서값 저장 관련 변수 ##
@@ -228,7 +233,7 @@ def zero_setting():
 # offset 적용하는 함수
 def offset_Setting():
     global array_Val, zero_Val, first_value, flag, lma_result, filter_flag
-    global result, sample_size, maf_first, data_matrix, index_maf, filter_select
+    global result, sample_size, maf_first, data_matrix, index_maf, FILTER_SELECT, STANDARD_SELECT
     
     array_Val = np.array(array_Val) - np.array(zero_Val)    # offset 적용
     
@@ -245,17 +250,24 @@ def offset_Setting():
         initial_guess = first_value    # 초기 자석의 위치좌표 및 자계강도 값
         
         # 먼저 초기값 H(내가 설정하는 값)를 정규화시켜야 함
-        if(flag == 0):        # 알고리즘 첫 시작에만 정규화시키면 됨. 이 후로는 알아서 정규화 값을 기준으로 값을 추정할 것임
-            initial_guess[5] = ((-1)*(initial_guess[3]*initial_guess[4]) / (initial_guess[3]+initial_guess[4]))  # Z값을 조건에 맞게 계산 후 대입 (m^2 + n^2 + p^2 = 1)
-            flag = 1          # 이후 flag 값을 1로 설정하여 더 이상 중복으로 정규화 계산하지 않도록 처리
-        elif(flag == 1):
-            initial_guess[5] = (1-(initial_guess[3]**2)-(initial_guess[4]**2))
-            H_norm = np.linalg.norm(initial_guess[3:6])                    # 정규화 계산을 위한 norm값 계산
-            initial_guess[3:6] = np.array(initial_guess[3:6]) / H_norm     # 초기 자계강도(H) 벡터에 대한 정규화 진행
+        # if(flag == 0):        # 알고리즘 첫 시작에만 정규화시키면 됨. 이 후로는 알아서 정규화 값을 기준으로 값을 추정할 것임
+        #     initial_guess[5] = ((-1)*(initial_guess[3]*initial_guess[4]) / (initial_guess[3]+initial_guess[4]))  # Z값을 조건에 맞게 계산 후 대입 (m^2 + n^2 + p^2 = 1)
+        #     flag = 1          # 이후 flag 값을 1로 설정하여 더 이상 중복으로 정규화 계산하지 않도록 처리
+        # elif(flag == 1):
+        #     initial_guess[5] = (1-(initial_guess[3]**2)-(initial_guess[4]**2))
+        #     H_norm = np.linalg.norm(initial_guess[3:6])                    # 정규화 계산을 위한 norm값 계산
+        #     initial_guess[3:6] = np.array(initial_guess[3:6]) / H_norm     # 초기 자계강도(H) 벡터에 대한 정규화 진행
         
+        ## LMA 연산
+        # 엘버타 기준 수식 사용
+        if(STANDARD_SELECT == 1):
+            result_pos = least_squares(residuals, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
         
-        result_pos = least_squares(residuals, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
-        
+        # 카네기멜론 기준 수식 사용
+        elif(STANDARD_SELECT == 2):
+            result_pos = least_squares(residuals2, initial_guess, method='lm')    # Levenberg-Marquardt Algorithm 계산
+
+
         # lma_result = [result_pos.x[0], result_pos.x[1], result_pos.x[2]]  # 위치 근사값만 따로 저장
         lma_result = result_pos.x[:6]
         
@@ -273,14 +285,14 @@ def offset_Setting():
         ######################################
 
         #### filter select 1: Any Filtering ####
-        if(filter_select == 1):
+        if(FILTER_SELECT == 1):
             for i in range(6):
                 first_value[i] = result_pos.x[i]
 
             # result = first_value[:3]   # rviz에 띄위기 위해 위치값만 따로 저장
         
         #### filter select 1: MAF ####
-        if(filter_select == 1):
+        if(FILTER_SELECT == 1):
             # MAF의 sampling 설정
             if (maf_first == True):
                 data_matrix[0, index_maf] = first_value[0]   # x값 샘플링
@@ -310,7 +322,7 @@ def offset_Setting():
         ##############################
         #### filter select 2: UKF ####
         ##############################
-        elif(filter_select == 2):
+        elif(FILTER_SELECT == 2):
             # 상태 차원과 측정 차원 설정
             dim_x = 6  # 상태변수 차원 (x, y, z 위치, bx, by, bz 자기밀도)
             dim_z = 6  # 측정변수 차원
@@ -323,16 +335,23 @@ def offset_Setting():
             ukf = UKF(dim_x=dim_x, dim_z=dim_z, dt=dt, fx=fx, hx=hx, points=points)
             ukf.x = first_value[:6]      # 초기 상태 추정치를 마찬가지로 first_value 값을 가져옴
             ukf.P *= np.cov(first_value - lma_result)          # 초기 상태 추정치의 불확실성(초기값에서 측정값 뺀 값)
-            # ukf.R = np.eye(dim_z) * 1.0  # 관측 노이즈
-            # ukf.Q = np.eye(dim_x) * 0.4  # 프로세스 노이즈
+            
+            # ukf.R = np.eye(dim_z) * 1.0  # 관측 노이즈: 측정 시스템에 노이즈가 많을수록 큰 값을 사용
+            # ukf.Q = np.eye(dim_x) * 0.4  # 프로세스 노이즈: 시스템의 변화가 빠르고 복잡할수록 큰 값을 사용
             
             # 엘버타 논문 기준
-            ukf.R = np.diag([900, 900, 900, 20, 20, 20])
-            ukf.Q = np.diag([0.05, 0.05, 0.05, 200, 200, 200])
-            
+            if(STANDARD_SELECT == 1):
+                # ukf.R = np.diag([900, 900, 900, 20, 20, 20])
+                # ukf.Q = np.diag([0.05, 0.05, 0.05, 200, 200, 200])
+                ukf.R = np.diag([1.41, 1.41, 1.41, 29, 29, 29])
+                ukf.Q = np.diag([11, 11, 11, 50.5, 50.5, 50.5])
+        
             # 카네기멜론 논문 기준
-            # ukf.R = np.diag([0.03, 0.03, 0.03, 0.05, 0.05, 0.05])
-            # ukf.Q = np.diag([0.5, 0.5, 0.5, 0.3, 0.3, 0.3])
+            elif(STANDARD_SELECT == 2):
+                ukf.R = np.diag([0.01, 0.01, 0.01, 0.5, 0.5, 0.5])
+                ukf.Q = np.diag([0.5, 0.5, 0.5, 0.9, 0.9, 0.9])
+                # ukf.R = np.eye(dim_z) * 0.5
+                # ukf.Q = np.eye(dim_x) * 20.0
 
 
             # 예제 측정 업데이트
@@ -369,11 +388,11 @@ def offset_Setting():
 #### 측정한 자기장 값과 계산한 자기장 값 사이의 차이를 계산하는 함수 ####
 # 여기서 오차 제곱까지 해 줄 필요는 없음. least_squares에서 알아서 계산해 줌
 def residuals(init_pos):
-    global array_Val, P, mns_coordi, mns_b
+    global array_Val, P, MU0, mns_coordi, mns_b
     differences = [] # 센서 값과 계산 값 사이의 잔차 값을 저장하는 배열변수 초기화
 
     mns_value = []
-    mns_value.extend(x / 1000 for x in mns_coordi)
+    mns_value.extend(x / 1000 for x in mns_coordi) # 알고리즘에는 [m]단위로 환산해서 들어감
     mns_value.extend(mns_b)
 
     # 위치에 대한 잔차 값의 총합 저장
@@ -407,10 +426,12 @@ def cal_B(A_and_H, P):
 
 #### 두 점 사이의 거리를 구하는 함수 ####
 def distance_3d(point1, point2):
-    if np.linalg.norm(point1-point2) > 0.001:
-        return np.linalg.norm(point1-point2)
-    elif np.linalg.norm(point1-point2) <= 0.001:
-        return 0.001
+    length = np.linalg.norm(point1-point2)
+    if length != 0:
+        return length
+    else:
+        # 두 source 사이의 거리가 0일 때의 처리
+        return np.zeros_like(length)
 
 #### H dot P의 값을 계산하는 함수(논문 식(3)~(5)) ####
 def h_dot_p(A, H, P):
@@ -422,8 +443,12 @@ def h_dot_p(A, H, P):
 
 ############ 카네기멜론 대학 논문 기준 ############
 def residuals2(init_pos):
-    global array_Val, P, first_value, cmag_final
+    global array_Val, P, first_value, mns_coordi, mns_b
     differences = []                        # (센서 값)과 (계산 값) 사이의 잔차 값을 저장하는 리스트변수 초기화
+
+    mns_value = []
+    mns_value.extend(x / 1000 for x in mns_coordi) # 알고리즘에는 [m]단위로 환산해서 들어감
+    mns_value.extend(x * MU0 for x in mns_b) # 자계강도 값에서 자기밀도 값으로 환산해서 들어감
 
     val = array_Val.reshape(3,3,3)           # 센서 값을 3x3 형태로 다시 저장(for 계산 용이)
     k_ij = []                                # K(i,j) 값을 저장할 리스트 변수 초기화
@@ -533,8 +558,8 @@ def main():
         marker.id = 0
         marker.type = Marker.SPHERE
         marker.action = Marker.ADD
-        marker.pose.position.x = -result[1] * 100
-        marker.pose.position.y = result[0] * 100
+        marker.pose.position.x = result[0] * 1000
+        marker.pose.position.y = result[1] * 1000
         marker.pose.position.z = 0#result[2]
         marker.pose.orientation.x = 0.0
         marker.pose.orientation.y = 0.0
