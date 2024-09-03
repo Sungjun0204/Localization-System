@@ -28,9 +28,9 @@ STANDARD_SELECT = 2                         # 사용하는 수식 출처 설정 
 zero_setting_flag = 0           # 4~5번 뒤에 offset을 작동시키기 위한 flag변수 선언*-
 
 if(STANDARD_SELECT == 1):
-    first_value = [0.0, 0.0, 0.065, 1050000, 1050000, 0]           # 엘버타 대학 논문 기준의 초기값
+    first_value = [0.0, 0.0, 0.065, 1050000, 1050000, 0]           # 엘버타 대학 논문 기준의 초기값(길이[m], 자계강도[H])
 elif(STANDARD_SELECT == 2):
-    first_value = [0.0, 0.0, 0.065, 1.05, 1.05, 1.05]       # 카네기멜론 대학 논문 기준의 초기값
+    first_value = [0.0, 0.0, 0.065, 4.509, 4.509, 4.509]       # 카네기멜론 대학 논문 기준의 초기값(길이[m], 자기밀도[mT])
 
 full_packet = ""                # 패킷 값을 저장하는 리스트 변수
 sensor_data = []                # 해체작업을 진행할 패킷 값을 저장하는 리스트 변수
@@ -68,7 +68,7 @@ P = np.array([                           # hall sensor의 각 위치좌표 값 �
                 [ 118,    0,   0],
                 [-118, -118,   0],
                 [   0, -118,   0],
-                [ 118, -118,   0] ]) * (1e-3) # m 단위로 맞추기 위한 환산
+                [ 118, -118,   0] ]) * (1e-3) # [m] 단위로 맞추기 위한 환산
 
 # 상수 선언
 MU0 = 4*(np.pi)*(1e-7)    # 진공투자율[H/m]
@@ -163,7 +163,7 @@ def parse_packet(packet):
         raw_sum += sum(sensor_values)  # 가공 전 원본 데이터 합산
         sensor_values[0] *= -1
         sensor_values = [v / 100000.0 for v in sensor_values]  # UART통신을 위해 없앴던 소수점 부활 (/100)
-                                                                # hall seneor는 단위가 uT이므로, mT로 단위 통일 (/1000)
+                                                                # hall seneor는 단위가 [uT]이므로, [mT]로 단위 통일 (/1000)
                                                                 # 따라서 100,000을 나눠준다
         sensors_data.append(sensor_values)
 
@@ -330,6 +330,7 @@ def offset_Setting():
 
             # 시그마 포인트 생성을 위한 매개변수
             points = MerweScaledSigmaPoints(n=dim_x, alpha=0.1, beta=2., kappa=0.5)
+            # points = MerweScaledSigmaPoints(n=dim_x, alpha=0.01, beta=2., kappa=3)
 
             # UKF 초기화
             ukf = UKF(dim_x=dim_x, dim_z=dim_z, dt=dt, fx=fx, hx=hx, points=points)
@@ -348,10 +349,10 @@ def offset_Setting():
         
             # 카네기멜론 논문 기준
             elif(STANDARD_SELECT == 2):
-                ukf.R = np.diag([0.01, 0.01, 0.01, 0.5, 0.5, 0.5])
-                ukf.Q = np.diag([0.5, 0.5, 0.5, 0.9, 0.9, 0.9])
-                # ukf.R = np.eye(dim_z) * 0.5
-                # ukf.Q = np.eye(dim_x) * 20.0
+                # ukf.R = np.diag([0.01, 0.01, 0.01, 0.5, 0.5, 0.5])
+                # ukf.Q = np.diag([0.5, 0.5, 0.5, 0.9, 0.9, 0.9])
+                ukf.R = np.diag([0.001, 0.001, 0.001, 0.523, 0.523, 0.523])
+                ukf.Q = np.diag([0.005, 0.005, 0.005, 0.4, 0.4, 0.4])
 
 
             # 예제 측정 업데이트
@@ -558,7 +559,7 @@ def main():
         marker.id = 0
         marker.type = Marker.SPHERE
         marker.action = Marker.ADD
-        marker.pose.position.x = result[0] * 1000
+        marker.pose.position.x = -result[0] * 1000
         marker.pose.position.y = result[1] * 1000
         marker.pose.position.z = 0#result[2]
         marker.pose.orientation.x = 0.0
