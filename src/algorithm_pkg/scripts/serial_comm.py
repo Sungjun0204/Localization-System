@@ -50,7 +50,8 @@ def process_serial_data(serial_data):
 def actuation_callback(data):
     global actuation_matrix
     temp = np.array(data.data).reshape(3,2)
-    actuation_matrix = temp
+    # actuation_matrix = (temp)
+    actuation_matrix = np.array([[1.4377, 1.4377],[0.7557, 0.7557],[0, 0]])
     # print(actuation_matrix)
 
 
@@ -80,15 +81,15 @@ def serial_comm():
             # print(processed_data, previous_float_value)
 
             current = np.array([processed_array[0], processed_array[1]]) # 1, 2번째 전류 값만 따로 취해서 저장
-            mns_final_b = actuation_matrix.dot(current) # actuation 행렬과 전류 행렬 내적하여 MNS가 발생시키는 자기밀도 값 계산
+            mns_final_b = np.dot(actuation_matrix, current) # actuation 행렬과 전류 행렬 내적하여 MNS가 발생시키는 자기밀도 값 계산
 
             # ROS 토픽으로 발행
             msg = Float32MultiArray()
             msg.data = mns_final_b
             pub.publish(msg)
-            # rospy.loginfo("Published: {}".format(processed_data))
+            rospy.loginfo("{}".format(processed_data))
             
-            print("... c mag b calculating ...")
+            # print("... c mag b calculating ...")
 
 
         rate.sleep()
