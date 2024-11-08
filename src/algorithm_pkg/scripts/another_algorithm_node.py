@@ -250,12 +250,6 @@ def residuals(init_pos):
             differences.append(buffer_residual)    # 각 센서들의 잔차 값을 differences 배열에 1차원으로 삽입
             k += 1
 
-    # # 위치에 대한 잔차 값의 총합 저장
-    # for i in range(9):
-    #     buffer_residual = k_ij[i] - cal_BB(init_pos, P[i])  # 실제값과 이론값 사이의 잔차 계산
-    #     differences.append(buffer_residual)    # 각 센서들의 잔차 값을 differences 배열에 1차원으로 삽입
-
-    # pprint.pprint(differences) # 계산한 잔차 값의 총합 출력
     return differences
 
 
