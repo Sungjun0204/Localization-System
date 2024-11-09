@@ -64,7 +64,7 @@ normalized_mns_c2 = np.array(normalized_mns_c2, dtype=np.float64)
 
 
 ## MAF 관련 변수 ##
-sample_size = 50                           # MAF의 sampling data의 갯수 설정
+sample_size = 20                           # MAF의 sampling data의 갯수 설정
 maf_first = True                            # MAF의 첫 sampling 알고리즘과 그 이후의 알고리즘을 구분하기 위한 flag변수
 data_matrix = np.zeros((3, sample_size))    # MAF를 위한 smapling data를 저장하는 3x100 행렬 선언.
 index_maf = 0                               # FIFO 방식을 위한 포인터
@@ -100,7 +100,7 @@ OFFSET_TIME = 1
 
 
 # 필터 파라미터 설정
-window_size = 5  # 이동 평균 창 크기
+window_size = 50  # 이동 평균 창 크기
 
 # 전역변수 초기화
 filtered_field = np.zeros((9, 3))
@@ -226,7 +226,10 @@ def scara_coordi_callback(data):
     global mns_coordi
 
     # 위치 값은 mm 단위로 받고 있음
-    mns_coordi[:3] = np.array(data.data[:3])
+    # mns_coordi[:3] = np.array(data.data[:3])
+    mns_coordi[0] = data.data[0]
+    mns_coordi[1] = data.data[1] + 80
+    mns_coordi[2] = data.data[2]
 
 
 # C-Mag MNS가 생성하는 자기밀도 값을 받아오는 callback 함수
