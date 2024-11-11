@@ -228,7 +228,7 @@ def scara_coordi_callback(data):
     # 위치 값은 mm 단위로 받고 있음
     # mns_coordi[:3] = np.array(data.data[:3])
     mns_coordi[0] = data.data[0]
-    mns_coordi[1] = data.data[1] + 80
+    mns_coordi[1] = data.data[1]
     mns_coordi[2] = data.data[2]
 
 
@@ -464,10 +464,7 @@ def offset_Setting():
             result = ukf.x[:6]                      # 진짜 최종 위치 값만 따로 저장
             # print(ukf.x)                # 값 확인
             
-        
-
-
-
+   
         
     # 평균 norm 값이 0.005 이하면(=자석이 센서 배열에서부터 20cm 이상 떨어져 있으면)
     else:
@@ -737,21 +734,28 @@ def main():
     rospy.init_node('algorithm_pkg_node', anonymous=True)   # 해당 노드 기본 설정
     
     #### 메세지 발행 설정 구간 ####
-    pub_mag    = rospy.Publisher('visualization_marker', Marker, queue_size=10)   # 최종 추정한 자석의 위치좌표
-    pub_mns    = rospy.Publisher('mns_marker', Marker, queue_size=10)      # MNS의 위치좌표
-    pub_sensor = rospy.Publisher('sensors_marker', Marker, queue_size=10)  # 센서 위치 좌표
+    pub_mag        = rospy.Publisher('visualization_marker', Marker, queue_size=10)   # 최종 추정한 자석의 위치좌표
+    pub_mns        = rospy.Publisher('mns_marker', Marker, queue_size=10)             # MNS의 위치좌표
+    pub_sensor     = rospy.Publisher('sensors_marker', Marker, queue_size=10)         # 센서 위치 좌표
+    pub_magnet_pos = rospy.Publisher('magnet_pos', Float32MultiArray, queue_size=10)  # 최종 추정된 자석 위치
 
     #### 메세지 구독 설정 구간 ####
     rospy.Subscriber('scara_coordi', Float32MultiArray, scara_coordi_callback) # /scara_coordi를 구독하고 scara_coordi_callback 함수 호출
-    rospy.Subscriber('c_mag_b', Float32MultiArray, c_mag_b_callback) # /c_mag_b를 구독하고 c_mag_b_callback 함수 호출
-    rospy.Subscriber('read', String, seperating_Packet)   # /read를 구독하고 seperating_Packet 함수 호출: 패킷 처리 함수
-    rospy.Subscriber('Is_offset', String, callback_offset)  # /Is_offset을 구독하고 callback_offset 함수 호출
+    rospy.Subscriber('c_mag_b', Float32MultiArray, c_mag_b_callback)           # /c_mag_b를 구독하고 c_mag_b_callback 함수 호출
+    rospy.Subscriber('read', String, seperating_Packet)                        # /read를 구독하고 seperating_Packet 함수 호출: 패킷 처리 함수
+    rospy.Subscriber('Is_offset', String, callback_offset)                     # /Is_offset을 구독하고 callback_offset 함수 호출
 
-    rate = rospy.Rate(10)  # 100Hz
+    rate = rospy.Rate(100)  # 100Hz
 
 
     #### 메인 반복문 ####
     while (not rospy.is_shutdown()):
+        # 최종 추정된 자석 위치 값 메세지 발행
+        final_magnet_pos = Float32MultiArray()    # 메세지 형식 지정
+        final_magnet_pos.data = np.array(result) / 10   # 메세지에 데이터 저장(단위 m로 환산하여 발행)
+        pub_magnet_pos.publish(final_magnet_pos)  # 발행
+
+        
         # 추정된 자석의 위치 마커 생성
         marker = Marker()
         marker.header = Header(frame_id="map", stamp=rospy.Time.now())
